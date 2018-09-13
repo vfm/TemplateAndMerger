@@ -3,6 +3,8 @@ using DevExpress.ExpressApp.Actions;
 using DevExpress.ExpressApp.DC;
 using DevExpress.ExpressApp.Editors;
 using DevExpress.ExpressApp.Templates;
+using DevExpress.ExpressApp.Templates.ActionControls;
+using DevExpress.ExpressApp.Templates.ActionControls.Binding;
 using DevExpress.Xpo;
 using System;
 using System.Collections.Generic;
@@ -191,8 +193,117 @@ namespace TemplateAndMerger.Module.Controllers
         where U : IMerger<T>
         where T : XPBaseObject
     {
-        PopupWindowShowAction pswMerger;
-        PopupWindowShowAction pswMergerContextMenu;
+        protected internal Dictionary<PopupWindowShowAction, ActionBinding> dictBinding = new Dictionary<PopupWindowShowAction, ActionBinding>();
+		bool bAddAction = false;
+		PopupWindowShowAction pswMerger;
+		PopupWindowShowAction pswMergerContextMenu;
+		protected override void OnActivated()
+		{
+			base.OnActivated();
+			// Perform various tasks depending on the target View.
+			Frame.ViewChanged += Frame_ViewChanged;
+			if (View.Id.EndsWith("_ListToMerge_ListView"))
+				pswMergerContextMenu.Active.SetItemValue("MergerContextActive", false);
+		}
+		private void Frame_ViewChanged(object sender, ViewChangedEventArgs e)
+		{
+			BindMergeAction(pswMerger);
+			BindMergeAction(pswMergerContextMenu);
+		}
+
+		private void BindMergeAction(PopupWindowShowAction pswAction)
+		{
+			IActionControlsSite site = Frame.Template as IActionControlsSite;
+			IActionControlContainer container = GetTargetActionContainer(site, pswAction);
+			if (container != null && container.FindActionControl(pswAction.Id) == null)
+			{
+				if (bAddAction)
+				{
+					// Action noch nicht da
+					ISimpleActionControl actionControl = container.AddSimpleActionControl(pswAction.Id);
+					actionControl.NativeControlDisposed += ActionControl_NativeControlDisposed;
+					ActionBinding actionBinding = ActionBindingFactory.Instance.Create(pswAction, actionControl);
+					if(!dictBinding.ContainsKey(pswAction))
+					{
+						dictBinding.Add(pswAction, actionBinding);
+					}
+				}
+			}
+			if (container != null && container.FindActionControl(pswAction.Id) == null)
+			{
+				if (bAddAction)
+				{
+					if (!dictBinding.ContainsKey(pswAction))
+					{
+						ISimpleActionControl actionControl = container.AddSimpleActionControl(pswAction.Id);
+						actionControl.NativeControlDisposed += ActionControl_NativeControlDisposed;
+						ActionBinding actionBinding = ActionBindingFactory.Instance.Create(pswAction, actionControl);
+						dictBinding.Add(pswAction, actionBinding);
+					}
+				}
+			}
+		}
+
+		private void ActionControl_NativeControlDisposed(object sender, System.EventArgs e)
+		{
+			IActionControl actionControl = (IActionControl)sender;
+			actionControl.NativeControlDisposed -= ActionControl_NativeControlDisposed;
+			var h = dictBinding.FirstOrDefault(k => k.Key.Id == actionControl.ActionId);
+			// Wirf die ActionBinding weg !!!
+			if (h.Value != null)
+			{
+				h.Value.Dispose();
+				dictBinding.Remove(h.Key);
+			}
+		}
+
+		private IActionControlContainer GetTargetActionContainer(IActionControlsSite site, PopupWindowShowAction pwsAction)
+		{
+			if (site == null) return null;
+			foreach (IActionControlContainer container in site.ActionContainers)
+			{
+				if (container.ActionCategory == pwsAction.Category)
+				{
+					return container;
+				}
+			}
+			return null;
+		}
+
+		protected override void OnViewControlsCreated()
+		{
+			base.OnViewControlsCreated();
+			//Teste ob Aktion gezeigt werden darf
+			// TO DO: Hier sollte man das SecuritySystem sicher besser nutzen
+			// TO DO: Ich kann es aber nicht besser
+			// Nur Nutzer mit 'SuperAdmin' Rolle sieht die 'Merge'-Aktion
+
+			/*Benutzer b = (SecuritySystem.CurrentUser as Benutzer);
+			if (b != null)
+			{
+				foreach (XRole r in b.Roles)
+				{
+					if (r.Name == "SuperAdmin")
+					{
+						bAddAction = true;
+						break;
+					}
+				}
+			}*/
+			bAddAction=true;
+			if (bAddAction)
+			{
+				BindMergeAction(pswMerger);
+				BindMergeAction(pswMergerContextMenu);
+			}
+		}
+
+		protected override void OnDeactivated()
+		{
+			// Unsubscribe from previously subscribed events and release other references and resources.
+			Frame.ViewChanged -= Frame_ViewChanged;
+			base.OnDeactivated();
+		}
 
         public MergerGenericViewController()
         {
@@ -216,37 +327,7 @@ namespace TemplateAndMerger.Module.Controllers
             pswMergerContextMenu.Execute += pswMerger_Execute;
             pswMergerContextMenu.CustomizePopupWindowParams += pswMerger_CustomizePopupWindowParams;
         }
-        protected override void OnActivated()
-        {
-            base.OnActivated();
-            // Perform various tasks depending on the target View.
-            if (View.Id.EndsWith("_ListToMerge_ListView"))
-                pswMergerContextMenu.Active.SetItemValue("MergerContextActive", false);
-        }
-
-        protected override void OnViewControlsCreated()
-        {
-            base.OnViewControlsCreated();
-            {
-                if (Frame != null)
-                {
-                    if (Frame.Template != null)
-                    {
-                        IActionContainer iac = Frame.Template.GetContainers().FirstOrDefault<IActionContainer>(c => c.ContainerId == pswMerger.Category);
-                        if (iac != null)
-                        {
-                            iac.Register(pswMerger);
-                        }
-
-                        iac = Frame.Template.GetContainers().FirstOrDefault<IActionContainer>(c => c.ContainerId == pswMergerContextMenu.Category);
-                        if (iac != null)
-                        {
-                            iac.Register(pswMergerContextMenu);
-                        }
-                    }
-                }
-            }
-        }
+        
 
         public void pswMerger_CustomizePopupWindowParams(object sender, CustomizePopupWindowParamsEventArgs e)
         {
